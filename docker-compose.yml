@@ -1,0 +1,140 @@
+version: "3.9"
+
+services:
+  # ── Redpanda (Kafka-compatible) ────────────────────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:v24.1.1
+    container_name: argus-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  # ── MinIO ─────────────────────────────────────────────────────────────
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-05-01T01-11-10Z
+    container_name: argus-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── PostGIS ───────────────────────────────────────────────────────────
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: argus-postgis
+    environment:
+      POSTGRES_DB: seopc
+      POSTGRES_USER: argus
+      POSTGRES_PASSWORD: argus
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U argus -d seopc"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Prometheus ────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: argus-prometheus
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+
+  # ── Grafana ───────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: argus-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: argus
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  # ── Satellite Service ─────────────────────────────────────────────────
+  satellite:
+    build:
+      context: ./satellite
+      dockerfile: Dockerfile
+    container_name: argus-satellite
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      MINIO_ADDR: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - ./downlink_buffer:/app/downlink_buffer
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Processor Worker ──────────────────────────────────────────────────
+  processor:
+    build:
+      context: ./processor
+      dockerfile: Dockerfile
+    container_name: argus-processor
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      MINIO_ADDR: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      POSTGRES_DSN: host=postgis dbname=seopc user=argus password=argus sslmode=disable
+      EMBEDDINGS_PATH: /app/cv/embeddings.npy
+      TILE_META_PATH: /app/cv/tile_metadata.json
+      LOCAL_SYNC_DIR: /app/local_sync
+    volumes:
+      - ./cv:/app/cv:ro
+      - local-sync:/app/local_sync
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      postgis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  minio-data:
+  pgdata:
+  grafana-data:
+  local-sync:
