@@ -1,0 +1,48 @@
+# ── Build artifacts ──────────────────────────────────
+satellite/satellite
+dashboard/dashboard
+gui/gui
+
+# ── Python ───────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# ── Go ───────────────────────────────────────────────
+vendor/
+*.sum
+
+# ── Runtime / generated data ─────────────────────────
+downlink_buffer/*
+!downlink_buffer/.gitkeep
+local_sync/*
+!local_sync/.gitkeep
+tiles/*
+!tiles/.gitkeep
+
+# ── CV artifacts (commit after generating) ───────────
+# cv/embeddings.npy     ← commit this after running generate_embeddings.py
+# cv/tile_metadata.json ← commit this after running generate_embeddings.py
+cv/__pycache__/
+
+# ── Secrets / env ─────────────────────────────────────
+.env
+*.env
+.env.local
+
+# ── Docker volumes ────────────────────────────────────
+observability/grafana/data/
+
+# ── IDE ───────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
