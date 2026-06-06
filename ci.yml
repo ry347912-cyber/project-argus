@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Go: Satellite Service ─────────────────────────────────
+  satellite:
+    name: Satellite (Go build + vet)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: satellite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
+      - run: go mod tidy
+      - run: go build ./...
+      - run: go vet ./...
+
+  # ── Go: Dashboard ─────────────────────────────────────────
+  dashboard:
+    name: Dashboard (Go build + vet)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
+      - run: go mod tidy
+      - run: go build ./...
+      - run: go vet ./...
+
+  # ── Python: Processor ─────────────────────────────────────
+  processor:
+    name: Processor (Python lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: processor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check worker.py --select=E,F,W --ignore=E501
+
+  # ── Python: CV ────────────────────────────────────────────
+  cv-lint:
+    name: CV Embedder (Python lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check cv/generate_embeddings.py --select=E,F,W --ignore=E501
+
+  # ── Docker Compose validate ───────────────────────────────
+  compose:
+    name: docker-compose.yml validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+
+  # ── GitHub Pages deploy (on main push) ────────────────────
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [satellite, dashboard, processor, compose]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - uses: actions/deploy-pages@v4
+        id: deployment
